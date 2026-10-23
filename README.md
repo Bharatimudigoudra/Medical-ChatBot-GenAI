@@ -1,50 +1,85 @@
-# MedGuide AI — LangGraph + Pinecone + FastAPI
+# MedGuide AI - LangGraph + Pinecone + FastAPI + Groq
 
-An educational medical assistant with retrieval from the bundled historical Gale Encyclopedia of Medicine (2002, Volume 1 A–B), optional Tavily fallback, image observations, speech input/output, and a vanilla JS web UI.
+An educational medical assistant. Ask a question in text or voice, optionally attach a photo, and get an answer grounded in a medical reference book (your own Pinecone index) with an optional web fallback, plus explicit uncertainty notes and source citations.
+
+This is a tutorial reference implementation for learning. It is not a clinically validated diagnostic system and not a HIPAA-compliant deployment. Safety behavior is instructed through the system prompt, not guaranteed.
+
+## How it works
+
+1. **Retrieve** - the question (plus the photo description, if a photo was attached) is embedded locally with `sentence-transformers/all-MiniLM-L6-v2` and matched against an existing 384-dimensional Pinecone index (`medicalbot`). No re-ingestion is needed; the index is reused as-is. Book excerpts below the relevance score are dropped.
+2. **Route** - if the book match is weak or missing, or the question asks for current guidance, the query goes to web search. Otherwise it goes straight to answering.
+3. **Web (optional)** - Tavily search runs only when routed to web and `TAVILY_API_KEY` is set.
+4. **Answer** - a Groq chat model composes the answer from the question, recent history, book excerpts, web results, and any photo observations. Sources are cited as `[PDF p.N]` (1-based page numbers) or web URLs.
+
+Photo analysis is a separate first step: the vision model produces an objective description of what is visible (no diagnosis, no measurements). If photo analysis fails, the app says so explicitly and does not answer from the photo.
+
+## Models (all via Groq)
+
+| Role | Model |
+|------|-------|
+| Answer generation | `openai/gpt-oss-120b` |
+| Photo description | `qwen/qwen3.8-27b` |
+| Voice transcription | `whisper-large-v3-turbo` |
+| Query embeddings (local, not an API call) | `sentence-transformers/all-MiniLM-L6-v2` |
+
+## Features
+
+- Chat UI in vanilla JS: Enter sends, Shift+Enter adds a new line.
+- Photo upload (PNG/JPEG/WebP up to 5 MB) or camera capture; the photo appears inside your sent message.
+- Voice input: record with the microphone (live level meter), transcribed to text on the server.
+- Read-aloud: one control in the toolbar. The "Read answer" text reads the latest answer from the start (click again to restart); the speaker icon mutes and unmutes, continuing from the same position. Uses the browser's own speechSynthesis voices.
+- Per-phase timing logs in the server console (`TIMING vision/retrieve/route/web/answer/total`) to show where each request spends its time.
+- Conversation memory per thread in a local SQLite file (`medical_memory.db`, created on first run, not committed).
+- Optional `API_TOKEN` check for the API; CORS restricted to local origins.
 
 ## Requirements
-Python 3.11 or 3.12; OpenAI, Pinecone, and Tavily API keys; internet connection. This is a tutorial reference implementation, **not** a clinically validated diagnostic system or HIPAA-compliant deployment.
 
-## Start
-```bash
-conda create -n project python=3.11 -y
+- Python 3.11
+- A Groq API key and a Pinecone API key
+- A Tavily API key (optional; web fallback is skipped without it)
+- Internet connection
 
-conda activate project
+## Setup
 
+```
+conda create -n medicalbot python=3.11 -y
+conda activate medicalbot
 pip install -r requirements.txt
-
-add  .env
-
-# Edit .env with real API keys
-
-python ingest.py --pdf data/medical_book.pdf
-
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-macOS/Linux: `python3 -m venv .venv && source .venv/bin/activate`, then install and run the same commands.
+Create a `.env` file in the project folder:
 
-Open **http://127.0.0.1:8000**. API documentation: **http://127.0.0.1:8000/docs**. `/api/health` checks configuration. Run `ingest.py` once before chatting; it makes paid embedding calls and creates a Pinecone serverless index. The Pinecone index uses 1536 dimensions for `text-embedding-3-small`. If using a different embedding model, adjust the dimension and use a fresh index.
+```
+GROQ_API_KEY=...
+PINECONE_API_KEY=...
+TAVILY_API_KEY=...        # optional
+# API_TOKEN=...           # optional: require a bearer token for the API
+```
+
+## Run
+
+```
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open http://127.0.0.1:8000. API documentation: http://127.0.0.1:8000/docs. `GET /api/health` reports whether keys are configured.
 
 ## Structure
-- `app/config.py` — environment and Conda SSL certificate workaround
-- `app/knowledge.py` — Pinecone vector retrieval
-- `app/agent.py` — LangGraph retrieve → route → Tavily (when needed) → answer
-- `app/main.py` — FastAPI, multimodal image observations, Whisper and TTS endpoints
-- `ingest.py` — chunk and embed every readable PDF page
-- `templates/index.html` — UI
-- `static/style.css`, `static/app.js` — styles and browser controls
-- `data/medical_book.pdf` — user-supplied reference PDF
+
+- `app/config.py` - environment settings and the conda SSL certificate workaround
+- `app/knowledge.py` - local MiniLM embedding + Pinecone retrieval from the existing index
+- `app/agent.py` - LangGraph flow: retrieve, route, optional web search, answer
+- `app/main.py` - FastAPI endpoints: chat, photo analysis, transcription, health
+- `templates/index.html`, `static/app.js`, `static/style.css` - the web UI
+- `docs/architecture-medguide-groq.png` - architecture diagram of the actual data flow
+- `data/` - user-supplied reference PDF (not committed). The bundled Gale Encyclopedia of Medicine (2002, Volume 1 A-B) is a historical source; answers identify it as such
+- `backup-*/` - safety copies made by update scripts (not committed)
 
 ## Troubleshooting
-- **Connecting / checking**: run `uvicorn` and open `/api/health` first. Check browser console and backend terminal.
-- **401**: if `API_TOKEN` is configured, enter it in the UI's API access section. Do not expose this token in a public browser deployment.
-- **502**: inspect backend terminal; verify OpenAI/Pinecone keys, Pinecone service availability, embedding dimension and SSL certificate.
-- **Camera/microphone**: browser permissions and localhost or HTTPS required.
-- **No KB results**: run `python ingest.py` and wait for successful completion; ensure same index and API keys.
-- **Tavily**: optional but needed for external fallback. Without its key, external search is disabled.
 
-## Security and production limitations
-This project is a functional tutorial scaffold, not a production medical device. Before deploying to real patients: replace shared API token with server-side identity/authentication; add database-backed encrypted conversations and retention/deletion controls; enforce request throttling and upload content verification; implement observability, tests, clinically reviewed emergency triage and evaluation; verify licensing to host/index the Gale PDF; obtain privacy/security/legal review; ensure current authoritative clinical references; and secure the deployment behind HTTPS. Do not send identifiable patient data to third-party APIs without appropriate consent and agreements.
-
-The historical book may contain obsolete clinical advice; model instructions do not guarantee safety. Images can be described but cannot confirm or rule out disease. This software does not make diagnoses.
+- **Connecting / checking:** start the server and open `/api/health` first. Check the browser console and the server terminal.
+- **401:** if `API_TOKEN` is set, enter it in the UI's "API access" section. Do not expose this token in a public deployment.
+- **502:** check the server terminal for a `Chat error:` line; verify Groq/Pinecone keys, the Pinecone index name, and connectivity.
+- **Slow answers:** each request prints `TIMING` lines in the server terminal showing how many seconds each phase took (photo analysis, book retrieval, web search, answer generation, total).
+- **Photo not analyzed:** the answer will say so explicitly. Retry, or remove the photo and ask as text.
+- **Read-aloud:** uses your browser's built-in voices; mute/unmute continues from the same position on voices that report their progress.
