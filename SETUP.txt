@@ -1,0 +1,33 @@
+MedGuide AI (tutorial UI) - Groq free-plan edition
+==================================================
+This is the Medical-Agentic-Chatbot tutorial with ONLY the provider
+connections adapted: Groq (free plan) instead of OpenAI, and your
+EXISTING Pinecone index ("medicalbot", MiniLM embeddings) reused as-is.
+No re-ingest, no OpenAI account, no paid calls. The UI is unchanged.
+
+Setup (Windows CMD, conda env GenAI active):
+
+1. Extract this ZIP into a NEW empty folder:
+   python -m zipfile -e "%USERPROFILE%\Downloads\medguide-groq.zip" "E:\AiProjects\Medical-Agentic-Chatbot"
+
+2. Copy your existing keys into it (they stay on your machine, never shown):
+   copy "E:\AiProjects\Medical-ChatBot-GenAI\.env" "E:\AiProjects\Medical-Agentic-Chatbot\.env"
+
+3. Install the extra packages:
+   pip install -r "E:\AiProjects\Medical-Agentic-Chatbot\requirements.txt"
+
+4. Run:
+   cd /d "E:\AiProjects\Medical-Agentic-Chatbot"
+   python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+   Open http://127.0.0.1:8000
+
+Notes:
+- Your old project (E:\AiProjects\Medical-ChatBot-GenAI) is untouched.
+- Read-aloud speaks the answer using your browser's built-in voices (no API key needed for it; depending on your browser, voices may be local or online).
+- The author's medical_memory.db files were intentionally left out
+  (they may contain someone else's chats). The app creates a fresh
+  empty one on first run.
+- ingest.py / test.py from the tutorial are not included: your index
+  is already filled, and test.py needed OpenAI.
+- Educational only, not medical advice. The bundled book is the 2002
+  Gale Encyclopedia volume A-B: historical and incomplete.
